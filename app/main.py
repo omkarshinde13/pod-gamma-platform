@@ -1,21 +1,15 @@
-from fastapi import FastAPI, status
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from datetime import datetime
 from typing import List
 
-try:
-    from app.anonymizer import process_analytics_pipeline
-    from app.streak import evaluate_user_streak
-except ImportError:
-    def process_analytics_pipeline(data):
-        return {"status": "Mocked Isolation Mode", "records_parsed": len(data)}
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
-    def evaluate_user_streak(l, c, s):
-        return {"status": "Mocked Isolation Mode", "current_streak": s}
 
 app = FastAPI(
-    title="Pod Gamma Asynchronous Gateway Engine",
-    description="Production-Ready Secure Routing Gateway for Module 4"
+    title="CyBreach Pod Gamma API Gateway",
+    version="1.0.0",
+    description="Track 2 API and Endpoint Gateway",
 )
 
 app.add_middleware(
@@ -26,43 +20,95 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class ScoreInputItem(BaseModel):
-    client_id: str = Field(..., min_length=3, max_length=50, description="Unique corporate identifier")
-    security_score: float = Field(..., ge=0.0, le=100.0, description="Raw engineering metrics score")
+    client_id: str = Field(min_length=3, max_length=50)
+    security_score: float = Field(ge=0.0, le=100.0)
+
 
 class StreamAnalyticsPayload(BaseModel):
-    stream: List[ScoreInputItem]
+    metrics: List[ScoreInputItem] = Field(default_factory=list)
+
 
 class StreakVerificationPayload(BaseModel):
-    last_log: str = Field(..., description="Timestamp of previous platform log")
-    current_log: str = Field(..., description="Timestamp of current engagement transaction")
-    current_streak: int = Field(..., ge=0, description="Active user streak count")
+    previous_login_timestamp: str
+    current_login_timestamp: str
+    active_streak: int = Field(ge=0)
 
-synthetic_db_records = [
-    {"client_id": f"COMP_ID_{i}", "security_score": float(65.0 + (i % 30))}
-    for i in range(1, 51)
-]
 
-@app.get("/health", status_code=status.HTTP_200_OK)
-def verify_system_health():
-    return {"status": "healthy"}
-
-@app.post("/api/v1/analytics", status_code=status.HTTP_200_OK)
-def process_benchmarks_gateway(payload: StreamAnalyticsPayload):
-    data_stream = [
-        {"client_id": item.client_id, "security_score": item.security_score}
-        for item in payload.stream
+def seed_corporate_profiles() -> List[dict]:
+    return [
+        {
+            "client_id": f"CORP-{index:03d}",
+            "company_name": f"Synthetic Corporation {index:03d}",
+            "security_score": float(50 + (index * 7) % 51),
+        }
+        for index in range(1, 51)
     ]
 
-    if not data_stream:
-        data_stream = synthetic_db_records
 
-    return process_analytics_pipeline(data_stream)
+SYNTHETIC_PROFILES = seed_corporate_profiles()
 
-@app.post("/api/v1/streaks", status_code=status.HTTP_200_OK)
-def process_gamification_streaks(payload: StreakVerificationPayload):
-    return evaluate_user_streak(
-        payload.last_log,
-        payload.current_log,
-        payload.current_streak
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
+@app.post("/api/v1/analytics")
+async def analytics(payload: StreamAnalyticsPayload):
+    metrics = payload.metrics
+
+    if not metrics:
+        metrics = [
+            ScoreInputItem(
+                client_id=profile["client_id"],
+                security_score=profile["security_score"],
+            )
+            for profile in SYNTHETIC_PROFILES
+        ]
+
+    average_score = sum(
+        item.security_score for item in metrics
+    ) / len(metrics)
+
+    return {
+        "status": "processed",
+        "records_processed": len(metrics),
+        "average_security_score": round(average_score, 2),
+        "metrics": [item.model_dump() for item in metrics],
+    }
+
+
+@app.post("/api/v1/streaks")
+async def verify_streak(payload: StreakVerificationPayload):
+    try:
+        previous_login = datetime.fromisoformat(
+            payload.previous_login_timestamp.replace("Z", "+00:00")
+        )
+        current_login = datetime.fromisoformat(
+            payload.current_login_timestamp.replace("Z", "+00:00")
+        )
+
+        elapsed_seconds = (current_login - previous_login).total_seconds()
+        elapsed_days = elapsed_seconds / 86400
+
+        consecutive_login = 0 < elapsed_days <= 1.0
+
+    except ValueError:
+        consecutive_login = False
+        elapsed_days = None
+
+    verified_streak = (
+        payload.active_streak + 1
+        if consecutive_login
+        else 0
     )
+
+    return {
+        "status": "processed",
+        "consecutive_login": consecutive_login,
+        "previous_active_streak": payload.active_streak,
+        "verified_streak": verified_streak,
+        "elapsed_days": elapsed_days,
+    }
