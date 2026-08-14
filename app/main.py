@@ -4,13 +4,15 @@ from typing import List
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
+from app.api.benchmark import router as benchmark_router
 
 app = FastAPI(
     title="CyBreach Pod Gamma API Gateway",
     version="1.0.0",
     description="Track 2 API and Endpoint Gateway",
+    
 )
+app.include_router(benchmark_router)
 
 app.add_middleware(
     CORSMiddleware,
